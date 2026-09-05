@@ -330,6 +330,9 @@ class IkfLitModel(LightningModule):
             metrics[f"{prefix}/self_collisions"] = self_collisions
 
         self.safe_log_metrics(metrics)
+        # Stash for callbacks: these go to the logger only, never through self.log, so
+        # they are absent from trainer.callback_metrics (the pole callback reads this).
+        self.last_val_metrics = metrics
 
         # B/c pytorch lightning is dumb (https://github.com/Lightning-AI/lightning/issues/12724)
         # self.global_step converted to float because of the following warning:

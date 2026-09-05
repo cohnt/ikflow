@@ -122,7 +122,10 @@ class PoleFractionCallback(Callback):
         self.seed = seed
         self.chunk = chunk
 
-    def on_validation_epoch_end(self, trainer, pl_module):
+    def on_validation_end(self, trainer, pl_module):
+        # on_validation_end (not on_validation_epoch_end): callback epoch-end hooks run
+        # BEFORE the module's, and the module's is what computes the val metrics this
+        # callback wants to include in status.json.
         if trainer.sanity_checking or not trainer.is_global_zero:
             return
         metrics = pole_metrics(
@@ -143,6 +146,7 @@ class PoleFractionCallback(Callback):
             lr = pl_module.get_lr()
         except Exception:
             lr = None
+        val_metrics = getattr(pl_module, "last_val_metrics", {})
         status = {
             "global_step": trainer.global_step,
             "world_size": trainer.world_size,
@@ -150,8 +154,8 @@ class PoleFractionCallback(Callback):
             "samples_per_step": samples_per_step,
             "samples_seen": trainer.global_step * samples_per_step if samples_per_step else None,
             "learning_rate": lr,
-            "val_l2_error": _metric(trainer, "val/l2_error"),
-            "val_angular_error": _metric(trainer, "val/angular_error"),
+            "val_l2_error": val_metrics.get("val/l2_error"),
+            "val_angular_error": val_metrics.get("val/angular_error"),
             "tr_loss": _metric(trainer, "tr/loss_ml"),
             "pole": pole,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),

@@ -52,6 +52,10 @@ import wandb  # noqa: E402
 
 from ikflow.config import DATASET_TAG_NON_SELF_COLLIDING  # noqa: E402
 from ikflow.model import IkflowModelParameters  # noqa: E402
+
+# Our checkpoints embed a pickled IkflowModelParameters (Lightning hyper_parameters);
+# torch >= 2.6 defaults torch.load to weights_only=True, which rejects it on resume.
+torch.serialization.add_safe_globals([IkflowModelParameters])
 from ikflow.ikflow_solver import IKFlowSolver  # noqa: E402
 from ikflow.training.lt_model import IkfLitModel  # noqa: E402
 from ikflow.training.lt_data import IkfLitDataset  # noqa: E402

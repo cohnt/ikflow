@@ -14,6 +14,7 @@ from ikflow.utils import (
 )
 from jrl.robots import get_robot, Robot
 
+import numpy as np
 import torch
 
 TRAINING_SET_SIZE_SMALL = int(1e5)
@@ -74,10 +75,15 @@ def save_dataset_to_disk(
     only_non_self_colliding: bool,
     tags: List[str],
     joint_limit_eps: float = 1e-6,
+    seed: int = 0,
 ):
     """
     Save training & testset numpy arrays to the provided directory
     """
+    # jrl's sample_joint_angles uses bare np.random, which is unseeded upstream — seed it
+    # here so the dataset is reproducible from (robot, sizes, seed).
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
     safe_mkdir(dataset_directory)
     if only_non_self_colliding:
@@ -127,6 +133,7 @@ def save_dataset_to_disk(
         f.write(f"  dataset_directory: {dataset_directory}\n")
         f.write(f"  training_set_size: {training_set_size}\n")
         f.write(f"  test_set_size:     {test_set_size}\n")
+        f.write(f"  seed:              {seed}\n")
 
         # Sanity check arrays.
         print_tensor_stats(samples_tr, writable=f, name="samples_tr")
@@ -167,6 +174,7 @@ if __name__ == "__main__":
     parser.add_argument("--robot_name", type=str)
     parser.add_argument("--training_set_size", type=int, default=int(2.5 * 1e6))
     parser.add_argument("--only_non_self_colliding", action="store_true")
+    parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
     robot = get_robot(args.robot_name)
@@ -184,6 +192,7 @@ if __name__ == "__main__":
         args.only_non_self_colliding,
         tags,
         joint_limit_eps=0.004363323129985824,  # np.deg2rad(0.25)
+        seed=args.seed,
     )
     print(f"Saved dataset with {args.training_set_size} samples in {time() - t0:.2f} seconds")
     print_saved_datasets_stats(tags)

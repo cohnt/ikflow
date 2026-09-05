@@ -2,7 +2,6 @@ from typing import Tuple, Dict
 from time import time
 
 from jrl.robots import Fetch
-from jrl.config import DEVICE
 import wandb
 import numpy as np
 import torch
@@ -49,7 +48,7 @@ class IkfLitModel(LightningModule):
 
         self.ik_solver = ik_solver
         self.nn_model = ik_solver.nn_model
-        self.nn_model.to(DEVICE)
+        # No .to(device) here: Lightning moves the module to each rank's device.
         self.base_hparams = base_hparams
         self.ndof = self.ik_solver.robot.ndof
         self.dim_tot = self.base_hparams.dim_latent_space
@@ -65,6 +64,13 @@ class IkfLitModel(LightningModule):
             self.automatic_optimization = False
 
         self._validation_step_outputs = []
+
+    def on_fit_start(self):
+        # Under DDP every rank runs seed_everything with the same seed, so softflow noise
+        # and the latent-padding draws would be bit-identical across ranks each step.
+        # Offsetting by global_rank decorrelates them; parameters are unaffected because
+        # DDP broadcasts rank 0's weights at init.
+        torch.manual_seed(torch.initial_seed() + self.trainer.global_rank)
 
     def configure_optimizers(self):
         """Configure the optimizer and learning rate scheduler"""
@@ -107,7 +113,7 @@ class IkfLitModel(LightningModule):
                 about in training is our generalization error. Epoch is an unneccessary construct.
         """
         lr_scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer, step_size=self.hparams.step_lr_every, gamma=self.hparams.gamma, verbose=False
+            optimizer, step_size=self.hparams.step_lr_every, gamma=self.hparams.gamma
         )
 
         # See 'configure_optimizers' in these docs to see the format of this dict: https://pytorch-lightning.readthedocs.io/en/stable/common/lightning_module.html
@@ -129,12 +135,12 @@ class IkfLitModel(LightningModule):
     def ml_loss_fn(self, batch):
         """Maximum likelihood loss"""
         x, y = batch
-        y = y.to(DEVICE)
-        x = x.to(DEVICE)
+        y = y.to(self.device)
+        x = x.to(self.device)
 
         batch_size = y.shape[0]
         if self.dim_tot > self.ndof:
-            pad_x = 0.001 * torch.randn((batch_size, self.dim_tot - self.ndof)).to(DEVICE)
+            pad_x = 0.001 * torch.randn((batch_size, self.dim_tot - self.ndof), device=self.device)
 
             # padding must be in (-SIGMOID_SCALING_ABS_MAX, SIGMOID_SCALING_ABS_MAX). This value will be scaled to these
             # bounds and then passed through inverse sigmoid. If they are outside of these bounds, inverse-sigmoid will
@@ -345,10 +351,10 @@ class IkfLitModel(LightningModule):
         conditional = torch.zeros(m, self.ik_solver.dim_cond)
         conditional[:, 0:3] = y[:3]
         conditional[:, 3 : 3 + 4] = y[3:]
-        conditional = conditional.to(DEVICE)
+        conditional = conditional.to(self.device)
 
         shape = (m, self.dim_tot)
-        latent = draw_latent("gaussian", 1, shape, None)
+        latent = draw_latent("gaussian", 1, shape, self.device)
         assert latent.shape[0] == m
         assert latent.shape[1] == self.dim_tot
 

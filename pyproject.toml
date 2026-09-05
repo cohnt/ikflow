@@ -1,7 +1,7 @@
 [project]
 name = "ikflow"
 version = "0.2.0"
-requires-python = ">=3.10,<3.12"
+requires-python = ">=3.10"
 description = "Open source implementation of the 'IKFlow' inverse kinematics solver"
 authors = [
     { name="Jeremy Morgan", email="jsmorgan6@gmail.com" }

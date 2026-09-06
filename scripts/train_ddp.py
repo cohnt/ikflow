@@ -137,7 +137,20 @@ if __name__ == "__main__":
     # this script exists for.
     assert args.optimizer != "ranger" or args.num_nodes * args.gpus_per_node == 1
 
-    robot = get_robot(args.robot_name)
+    # jrl's Robot.__init__ truncate-rewrites its cached *_link_filepaths_absolute.urdf
+    # on EVERY construction, and all ranks share one $HOME/.cache/jrl on Lustre — a rank
+    # that loadRobot()s while another rank's write is in flight reads half-written XML
+    # (killed job 5549615). Stagger construction by rank, and retry in case a straggler
+    # still collides.
+    time.sleep(2.0 * GLOBAL_RANK)
+    for _attempt in range(3):
+        try:
+            robot = get_robot(args.robot_name)
+            break
+        except (AssertionError, ValueError):
+            if _attempt == 2:
+                raise
+            time.sleep(5.0)
     base_hparams = IkflowModelParameters()
     base_hparams.run_description = args.run_description
     base_hparams.coupling_layer = args.coupling_layer

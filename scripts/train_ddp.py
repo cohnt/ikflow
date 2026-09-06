@@ -23,6 +23,7 @@ Example (one cluster node, both GPUs):
 
 import argparse
 import os
+import time
 
 # ---- Device preamble: MUST run before any jrl import. -----------------------------
 # torchrun sets LOCAL_RANK/RANK/WORLD_SIZE; single-process runs default to 0/0/1.
@@ -240,4 +241,18 @@ if __name__ == "__main__":
     if GLOBAL_RANK == 0:
         print(f"world_size={trainer.world_size}, samples_per_step={samples_per_step}, resume={resume_path}")
 
+    _t0 = time.monotonic()
     trainer.fit(model, data_module, ckpt_path=resume_path)
+    _elapsed = time.monotonic() - _t0
+    if GLOBAL_RANK == 0:
+        # Throughput line for the calibration stage. global_step counts optimizer
+        # steps from the START of this fit only when not resuming; on resume the
+        # steps/s figure is diluted by the restored offset, so calibration runs
+        # start fresh. Elapsed includes startup (~30-40 s), amortized by >=1000
+        # steps in calibration configs.
+        print(
+            f"THROUGHPUT steps={trainer.global_step} elapsed_s={_elapsed:.1f} "
+            f"steps_per_s={trainer.global_step / _elapsed:.3f} "
+            f"samples_per_s={trainer.global_step * samples_per_step / _elapsed:.0f} "
+            f"world_size={trainer.world_size} batch_per_rank={args.batch_size}"
+        )

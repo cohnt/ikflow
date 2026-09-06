@@ -127,10 +127,13 @@ class IkfLitModel(LightningModule):
 
     def safe_log_metrics(self, vals: Dict):
         assert isinstance(vals, dict)
-        try:
-            self.logger.log_metrics(vals, step=self.global_step)
-        except AttributeError:
-            pass
+        # self.logger is only trainer.loggers[0]; dispatch to every attached logger
+        # (CSVLogger AND WandbLogger) or the wandb run receives no metrics at all.
+        for logger in self.loggers:
+            try:
+                logger.log_metrics(vals, step=self.global_step)
+            except AttributeError:
+                pass
 
     def ml_loss_fn(self, batch):
         """Maximum likelihood loss"""

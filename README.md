@@ -10,6 +10,65 @@ python scripts/benchmark_generate_exact_solutions.py --model_name=panda__full__l
 ![alt text](../media/exact_ik_runtime__model:panda__full__lp191_5.25m.png?raw=true)
 
 
+## This fork
+
+This is a fork of [jstmn/ikflow](https://github.com/jstmn/ikflow) maintained for the
+`learned-ik` project (solving IK with an IKFlow network inside a Drake optimization program).
+It exists to retrain the iiwa14 checkpoint on multiple GPUs; upstream's training path is
+single-GPU only.
+
+**Everything upstream still works unchanged.** `scripts/train.py` is deliberately untouched so
+the fork stays easy to diff against upstream, and inference is unaffected.
+
+What this fork adds:
+
+- **`scripts/train_ddp.py`** — multi-node, multi-GPU training via PyTorch DDP under Lightning.
+  Launched with `torchrun`; an explicit `TorchElasticEnvironment` plugin is used so Lightning
+  does not auto-select `SLURMEnvironment` and mis-rank the torchrun children inside a Slurm job.
+- **Local checkpoint resume.** Upstream can only resume from a wandb artifact.
+  `--ckpt_path=auto` picks up `last.ckpt` from the run directory, restoring optimizer state,
+  the LR schedule and `global_step`.
+- **`ikflow/training/pole_callback.py`** — a validation-time diagnostic that samples the
+  conditioning/latent domain and reports the fraction of draws whose output joint
+  configuration blows up (`pole/frac_gt_1000`, `frac_gt_3`, p50/p99/max). This is the metric
+  the retrain is aimed at. It also writes a `status.json` heartbeat, which is how long cluster
+  runs are monitored.
+- **`samples_seen` logging**, so runs at different world sizes can be compared on the samples
+  axis rather than on optimizer-step counts.
+- **`--seed` for `scripts/build_dataset.py`** (upstream dataset generation is unseeded).
+
+Bug fixes carried here:
+
+- `ikflow/training/lt_data.py` imported a lowercase `device` that does not exist (`ImportError`).
+- `StepLR(..., verbose=...)` raises a `TypeError` on torch >= 2.x.
+- Resume failed under torch >= 2.6 due to the `weights_only` default (fixed with `safe_globals`).
+- `safe_log_metrics` logged only to `self.logger` (i.e. `loggers[0]`), so with more than one
+  logger attached, all but the first silently received nothing.
+- `jrl` truncate-rewrites its cached `*_link_filepaths_absolute.urdf` on every `Robot` init;
+  with several ranks sharing a filesystem, one rank could read half-written XML. `get_robot`
+  is now staggered per rank and retried.
+
+DDP-specific changes to the training internals: the dataset is kept on CPU and handed to a
+plain `DataLoader` so Lightning can attach a `DistributedSampler`; `jrl.config`'s
+module-scope `torch.set_default_device` is neutralized; the model is placed by Lightning
+rather than by an explicit `.to(DEVICE)`; and the per-rank softflow seed is decorrelated.
+
+Example (8 ranks over 4 nodes, 2 GPUs each):
+
+```
+torchrun --nnodes=4 --nproc_per_node=2 --node_rank=$NODE_RANK \
+    --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:29500 \
+    scripts/train_ddp.py \
+    --robot_name=iiwa14 --run_dir=/path/to/run \
+    --num_nodes=4 --gpus_per_node=2 \
+    --batch_size=512 --learning_rate=1.5e-4 --step_lr_every=2441 \
+    --ckpt_path=auto
+```
+
+Note `--batch_size` is **per rank**; the global batch is `batch_size * world_size`. When
+scaling the global batch, scale `--step_lr_every` down by the same ratio so the LR decay per
+*sample* is unchanged.
+
 ## Setup
 
 The following section outlines the setup procedures required to run the visualizer that this project uses. The only supported OS is Ubuntu. Visualization may work on Mac and Windows, I haven't tried it though. For Ubuntu, there are different system wide dependencies for `Ubuntu > 21` and `Ubuntu < 21`. For example, `qt5-default` is not in the apt repository for Ubuntu 21.0+ so can't be installed. See https://askubuntu.com/questions/1335184/qt5-default-not-in-ubuntu-21-04.

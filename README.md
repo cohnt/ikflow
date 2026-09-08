@@ -25,6 +25,10 @@ What this fork adds:
 - **`scripts/train_ddp.py`** — multi-node, multi-GPU training via PyTorch DDP under Lightning.
   Launched with `torchrun`; an explicit `TorchElasticEnvironment` plugin is used so Lightning
   does not auto-select `SLURMEnvironment` and mis-rank the torchrun children inside a Slurm job.
+- **Every checkpoint is kept** (`save_top_k=-1`). Upstream's rotation discards all but
+  the most recent few, which makes a finished run unable to answer any question about
+  *when* something changed during training. At ~611 MB each and ~30 per run that is
+  ~19 GB, far cheaper than re-running a multi-day job.
 - **Local checkpoint resume.** Upstream can only resume from a wandb artifact.
   `--ckpt_path=auto` picks up `last.ckpt` from the run directory, restoring optimizer state,
   the LR schedule and `global_step`.

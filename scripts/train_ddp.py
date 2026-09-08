@@ -203,13 +203,19 @@ if __name__ == "__main__":
         sigmoid_on_output=boolean_string(args.sigmoid_on_output),
     )
 
+    # save_top_k=-1 keeps EVERY checkpoint. This was 2, which silently rotated the run's
+    # history away: the iiwa14_ddp_r1 run developed pole mass somewhere around step 360000
+    # and by the time anyone looked, every checkpoint before 540000 was gone, so when the
+    # pole mass appeared could not be recovered without retraining from scratch. Checkpoints
+    # are ~611 MB at this architecture and a full run writes ~30 of them, so keeping all of
+    # them costs ~19 GB against a filesystem with petabytes free -- nothing, against the
+    # cost of re-running a multi-day job to answer a question the checkpoints already held.
+    # monitor/mode are irrelevant when nothing is being ranked, so they are dropped.
     checkpoint_callback = ModelCheckpoint(
         dirpath=ckpt_dir,
         every_n_train_steps=args.checkpoint_every,
         save_on_train_epoch_end=False,
-        save_top_k=2,
-        monitor="global_step",
-        mode="max",
+        save_top_k=-1,
         save_last=True,
         filename="ikflow-checkpoint-{step}",
     )
